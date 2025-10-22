@@ -66,3 +66,6 @@ Attn["p","dv"]  = Comp["p","p2"] * Val["p2","dv"]
 ```
 
 This compiles to efficient backend `einsum` on NumPy / PyTorch / JAX.
+
+# Development
+Repository is under development
