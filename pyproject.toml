@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tensorlogic"
+version = "0.0.2"
+description = "Tensor Logic: a named-index tensor language that unifies logic and tensor computation."
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{ name = "Davit Buniatyan", email = "davit@activeloop.ai" }]
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.21"]
+
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.optional-dependencies]
+torch = ["torch>=2.0"]
+
+[tool.hatch.build.targets.sdist]
+include = ["tensorlogic", "README.md", "LICENSE", "examples", "examples_torch", "tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["tensorlogic"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]
