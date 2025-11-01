@@ -86,3 +86,6 @@ print("Raw scores:", scores)
 ```
 
 This compiles to efficient backend `einsum` on NumPy / PyTorch / JAX.
+
+# Development
+Repository is under development
