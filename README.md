@@ -53,13 +53,12 @@ K = Tensor(np.zeros((2,2)), ["i","i2"], name="K")
 K["i","i2"] = (X["i","j"] * X["i2","j"]) ** 2
 print("Kernel:", K["i","i2"].eval().numpy())
 
-# Attention mechanism (new syntax: explicit eval and intermediate numpy usage)
+# Attention mechanism (now using a single pass, no intermediate computation)
 X = Tensor(np.array([[0.1, 0.2],[0.3, 0.4],[0.1,0.8]]), ["p","d"], name="X")
 WQ = Tensor(np.eye(2), ["dk","d"], name="WQ")
 WK = Tensor(np.eye(2), ["dk","d"], name="WK")
 WV = Tensor(np.eye(2), ["dv","d"], name="WV")
 
-# Set up queries, keys, values with named indices
 Query = Tensor(np.zeros((3,2)), ["p","dk"], name="Query")
 Key = Tensor(np.zeros((3,2)), ["p","dk"], name="Key")
 Val = Tensor(np.zeros((3,2)), ["p","dv"], name="Val")
@@ -70,18 +69,9 @@ Query["p","dk"] = WQ["dk","d"] * X["p","d"]
 Key["p","dk"]   = WK["dk","d"] * X["p","d"]
 Val["p","dv"]   = WV["dv","d"] * X["p","d"]
 
-# Evaluate the query/key/value tensors to get numpy arrays
-Query_eval = Query["p","dk"].eval()
-Key_eval = Key["p","dk"].eval()
-Val_eval = Val["p","dv"].eval()
-
-# Create new tensors with the computed values
-Query_final = Tensor(Query_eval.numpy(), ["p","dk"], name="Query_final")
-Key_final = Tensor(Key_eval.numpy(), ["p","dk"], name="Key_final")
-Val_final = Tensor(Val_eval.numpy(), ["p","dv"], name="Val_final")
-
-# Compute raw attention scores
-scores = Query_final.numpy() @ Key_final.numpy().T
+# Compute raw attention scores using deferred evaluation (no intermediate numpy operations)
+Comp["p","p2"] = Query["p","dk"] * Key["p2","dk"]  # einsum over shared 'dk'
+scores = Comp["p","p2"].eval().numpy()
 print("Raw scores:", scores)
 ```
 
