@@ -1,20 +1,17 @@
 
 import numpy as np
-from tensorlogic import Program, nt
+from tensorlogic import Tensor, clear_global_program
 
-def test_sugar_kernel_equals_dsl():
-    P = Program()
-    K, X = P.vars("K","X")
-    P.set_tensor("X", nt(np.array([[1.0,2.0],[3.0,4.0]]), ["i","j"]))
+def test_sugar_kernel():
+    clear_global_program()
+    X = Tensor(np.array([[1.0,2.0],[3.0,4.0]]), ["i","j"], name="X")
+    K = Tensor(np.zeros((2,2)), ["i","i2"], name="K")
 
     # Sugar assignment
     K["i","i2"] = (X["i","j"] * X["i2","j"]) ** 2
-    Ks = P.eval("K[i,i2]").numpy()
-
-    # DSL assignment equivalent
-    P2 = Program()
-    P2.set_tensor("X", nt(np.array([[1.0,2.0],[3.0,4.0]]), ["i","j"]))
-    P2.equation("K[i,i2] = (X[i,j] * X[i2,j]) ^ 2")
-    Kd = P2.eval("K[i,i2]").numpy()
-
-    assert np.allclose(Ks, Kd)
+    result = K["i","i2"].eval().numpy()
+    
+    # Expected: (x dot y)^2
+    Phi = X.numpy()
+    expected = (Phi @ Phi.T)**2
+    assert np.allclose(result, expected)

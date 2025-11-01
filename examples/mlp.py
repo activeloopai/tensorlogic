@@ -1,10 +1,10 @@
-from tensorlogic import Program, nt
+from tensorlogic import Tensor
 
 # Simple MLP: Y = step(W[i,j] * X[j])
-P = Program(backend="numpy")
-P.set_tensor("W", nt([[2.0, -1.0],[0.3,0.7]], ["i","j"]))
-P.set_tensor("X", nt([1.0, 3.0], ["j"]))
+W = Tensor([[2.0, -1.0],[0.3,0.7]], ["i","j"], name="W")
+X = Tensor([1.0, 3.0], ["j"], name="X")
+Y = Tensor([0.0, 0.0], ["i"], name="Y")
 
-P.equation("Y[i] = step(W[i,j] * X[j])")
-Y = P.eval("Y[i]")
-print("Y:", Y.numpy(), "indices:", Y.indices)
+Y["i"] = (W["i","j"] * X["j"]).step()
+result = Y["i"].eval()
+print("Y:", result.numpy(), "indices:", result.indices)

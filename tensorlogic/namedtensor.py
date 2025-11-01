@@ -1,5 +1,6 @@
 
 from __future__ import annotations
+import inspect
 from dataclasses import dataclass
 from typing import Dict, Tuple, Sequence, List, Optional, Any
 from .backend import Backend, get_backend
@@ -11,6 +12,72 @@ class NamedTensor:
     data: Any
     indices: Tuple[Index, ...]
     backend: Backend
+    name: Optional[str] = None
+
+    def __init__(self, data, indices: Sequence[Index], backend: Backend = None, name: str = None):
+        if backend is None:
+            backend = get_backend(None)
+        t = backend.asarray(data)
+        self.data = t
+        self.indices = tuple(indices)
+        self.backend = backend
+        self.name = name
+
+        # Register with global program if name provided
+        if self.name:
+            from . import _global_program
+            _global_program.set_tensor(self.name, self)
+
+
+    def __getitem__(self, indices):
+        """Enable X['i','j'] syntax like Var."""
+        if not self.name:
+            raise ValueError("Tensor must have a name to use indexing syntax. Provide name parameter or assign to a variable.")
+        from .program import Expr, TensorRef
+        from . import _global_program
+        if isinstance(indices, tuple):
+            idx = indices
+        else:
+            idx = (indices,)
+        return Expr(_global_program, TensorRef(self.name, tuple(idx)))
+
+    def __setitem__(self, indices, rhs):
+        """Enable X['i','j'] = ... syntax for equations."""
+        if not self.name:
+            raise ValueError("Tensor must have a name to use assignment syntax. Provide name parameter or assign to a variable.")
+        from .program import to_expr, Equation
+        from . import _global_program
+        if isinstance(indices, tuple):
+            idx = indices
+        else:
+            idx = (indices,)
+        expr = to_expr(rhs, _global_program)
+        eq = Equation(self.name, tuple(idx), expr.ast)
+        _global_program.equation(eq)
+
+    def _auto_detect_name(self) -> Optional[str]:
+        """Try to detect the variable name from the call stack."""
+        try:
+            # Get the caller's frame
+            frame = inspect.currentframe().f_back
+            print(f"Frame: {frame}, name: {frame.f_code.co_name if frame else None}")
+            if frame and frame.f_code.co_name == '<module>':
+                # We're called from global scope
+                # Get the source code of the calling line
+                import linecache
+                filename = frame.f_code.co_filename
+                print(f"Filename: {filename}, lineno: {frame.f_lineno}")
+                line_content = linecache.getline(filename, frame.f_lineno).strip()
+                print(f"Line content: {repr(line_content)}")
+                # Look for pattern like "X = Tensor("
+                import re
+                match = re.match(r'(\w+)\s*=\s*Tensor\s*\(', line_content)
+                if match:
+                    return match.group(1)
+        except Exception as e:
+            print(f"Name detection failed: {e}")
+            pass
+        return None
 
     def reorder(self, new_indices: Sequence[Index]) -> "NamedTensor":
         """Reorder axes to match new_indices (subset must match)"""
@@ -47,7 +114,7 @@ class NamedTensor:
 
     def __mul__(self, other):
         if isinstance(other, NamedTensor):
-            raise ValueError("Use Program._einsum_product to multiply named tensors with joins.")
+            raise ValueError("Use einsum operations (via Tensor indexing) to multiply named tensors with joins.")
         else:
             return NamedTensor(self.backend.mul(self.data, other), self.indices, self.backend)
 
@@ -62,10 +129,7 @@ class NamedTensor:
 
 def nt(data, indices: Sequence[Index], backend: Backend=None) -> NamedTensor:
     """Convenience to build a NamedTensor from raw data and index names."""
-    if backend is None:
-        backend = get_backend(None)
-    t = backend.asarray(data)
-    return NamedTensor(t, tuple(indices), backend)
+    return NamedTensor(data, indices, backend)
 
 
 def align_binary(a: NamedTensor, b: NamedTensor) -> NamedTensor:

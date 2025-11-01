@@ -28,41 +28,61 @@ This repository provides a lightweight Python framework with **swappable backend
 ## Quick peek
 
 ```python
-from tensorlogic import Program, nt
+from tensorlogic import Tensor
 
-P = Program()                             # numpy backend by default
-P.set_tensor("W", nt([[2., -1.]], ["i","j"]))  # 1x2
-P.set_tensor("X", nt([1., 3.], ["j"]))         # 2
+# Minimal tensor logic - just like writing math equations!
+W = Tensor([[2., -1.],[0.3, 0.7]], ["i","j"], name="W")  # 2x2 weights
+X = Tensor([1., 3.], ["j"], name="X")         # 2 inputs
+Y = Tensor([0., 0.], ["i"], name="Y")         # output
 
-P.equation("Y[i] = step(W[i,j] * X[j])")  # einsum 'ij,j->i' + step
-Y = P.eval("Y[i]")                         # returns NamedTensor
+Y["i"] = (W["i","j"] * X["j"]).step()      # einsum 'ij,j->i' + step
+result = Y["i"].eval()                      # evaluate eagerly
 
-print(Y.indices, Y.data)  # ('i',)  array([1., 0.])
+print(result.indices, result.data)         # ('i',)  [0. 1.]
 ```
 
-See `examples/` for more!
-
-
-## Pythonic sugar (write equations directly in Python)
+## Write equations just like math
 
 ```python
-from tensorlogic import Program, nt, softmax
+from tensorlogic import Tensor
+import numpy as np
 
-P = Program()
-K, X = P.vars("K","X")
-P.set_tensor("X", nt([[1.,2.],
-                      [3.,4.]], ["i","j"]))
-
-# K[i,i2] = (X[i,j] * X[i2,j])^2
+# Kernel computation (squared dot kernel)
+X = Tensor([[1.,2.],[3.,4.]], ["i","j"], name="X")
+K = Tensor(np.zeros((2,2)), ["i","i2"], name="K")
 K["i","i2"] = (X["i","j"] * X["i2","j"]) ** 2
+print("Kernel:", K["i","i2"].eval().numpy())
 
-# Attention (single head)
-Query, Key, Val, Comp, Attn = P.vars("Query","Key","Val","Comp","Attn")
+# Attention mechanism (new syntax: explicit eval and intermediate numpy usage)
+X = Tensor(np.array([[0.1, 0.2],[0.3, 0.4],[0.1,0.8]]), ["p","d"], name="X")
+WQ = Tensor(np.eye(2), ["dk","d"], name="WQ")
+WK = Tensor(np.eye(2), ["dk","d"], name="WK")
+WV = Tensor(np.eye(2), ["dv","d"], name="WV")
+
+# Set up queries, keys, values with named indices
+Query = Tensor(np.zeros((3,2)), ["p","dk"], name="Query")
+Key = Tensor(np.zeros((3,2)), ["p","dk"], name="Key")
+Val = Tensor(np.zeros((3,2)), ["p","dv"], name="Val")
+Comp = Tensor(np.zeros((3,3)), ["p","p2"], name="Comp")
+Attn = Tensor(np.zeros((3,2)), ["p","dv"], name="Attn")
+
 Query["p","dk"] = WQ["dk","d"] * X["p","d"]
 Key["p","dk"]   = WK["dk","d"] * X["p","d"]
 Val["p","dv"]   = WV["dv","d"] * X["p","d"]
-Comp["p","p2"]  = softmax(Query["p","dk"] * Key["p2","dk"], axis="p2").ast
-Attn["p","dv"]  = Comp["p","p2"] * Val["p2","dv"]
+
+# Evaluate the query/key/value tensors to get numpy arrays
+Query_eval = Query["p","dk"].eval()
+Key_eval = Key["p","dk"].eval()
+Val_eval = Val["p","dv"].eval()
+
+# Create new tensors with the computed values
+Query_final = Tensor(Query_eval.numpy(), ["p","dk"], name="Query_final")
+Key_final = Tensor(Key_eval.numpy(), ["p","dk"], name="Key_final")
+Val_final = Tensor(Val_eval.numpy(), ["p","dv"], name="Val_final")
+
+# Compute raw attention scores
+scores = Query_final.numpy() @ Key_final.numpy().T
+print("Raw scores:", scores)
 ```
 
 This compiles to efficient backend `einsum` on NumPy / PyTorch / JAX.

@@ -1,6 +1,6 @@
 
 from __future__ import annotations
-from typing import Dict, List, Tuple, Sequence, Any, Optional
+from typing import Dict, List, Tuple, Sequence, Any, Optional, Union
 from .backend import get_backend, Backend
 from .namedtensor import NamedTensor
 
@@ -20,10 +20,10 @@ def relation_from_facts(name: str,
                         indices: Sequence[str],
                         facts: Sequence[Tuple[str, ...]],
                         domains: Dict[str, Domain],
-                        backend: Backend=None) -> NamedTensor:
+                        backend: Union[Backend, str, None] = None) -> NamedTensor:
     """Build a Boolean (0/1 float) tensor from a list of facts (tuples of symbols)."""
-    if backend is None:
-        backend = get_backend(None)
+    if backend is None or isinstance(backend, str):
+        backend = get_backend(backend)
     shape = [ len(domains[idx]) for idx in indices ]
     data = backend.zeros(shape)
     # mark ones

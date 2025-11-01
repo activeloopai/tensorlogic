@@ -1,18 +1,18 @@
-from tensorlogic import Program, Domain, relation_from_facts
-
+from tensorlogic import Tensor, Domain, relation_from_facts
+import numpy as np
 People = Domain(["Alice","Bob","Charlie"])
-P = Program()
 
-Parent = relation_from_facts("Parent", ["x","y"],
-    [("Alice","Bob"), ("Bob","Charlie")], {"x": People, "y": People}, P.backend)
-Sister = relation_from_facts("Sister", ["x","y"],
-    [("Alice","Bob")], {"x": People, "y": People}, P.backend)
+Parent_data = relation_from_facts("Parent", ["x","y"],
+    [("Alice","Bob"), ("Bob","Charlie")], {"x": People, "y": People}, "numpy")
+Sister_data = relation_from_facts("Sister", ["x","y"],
+    [("Alice","Bob")], {"x": People, "y": People}, "numpy")
 
-P.set_tensor("Parent", Parent)
-P.set_tensor("Sister", Sister)
+Parent = Tensor(Parent_data.data, Parent_data.indices, name="Parent")
+Sister = Tensor(Sister_data.data, Sister_data.indices, name="Sister")
 
 # Aunt(x,z) <- Sister(x,y), Parent(y,z)
-P.equation("Aunt[x,z] = step(Sister[x,y] * Parent[y,z])")
+Aunt = Tensor(np.zeros((3,3)), ["x","z"], name="Aunt")
+Aunt["x","z"] = (Sister["x","y"] * Parent["y","z"]).step()
 
-q = P.eval("Aunt[x,z]")
+q = Aunt["x","z"].eval()
 print(q.indices, q.numpy())

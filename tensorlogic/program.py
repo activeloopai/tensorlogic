@@ -70,6 +70,18 @@ class Expr:
     def step(self): return Expr(self.prog, Call("step", (self.ast,), {}))
     def lnorm(self): return Expr(self.prog, Call("lnorm", (self.ast,), {}))
     def gelu(self): return Expr(self.prog, Call("gelu", (self.ast,), {}))
+    
+    def eval(self):
+        """Evaluate this expression eagerly and return a NamedTensor."""
+        from .namedtensor import NamedTensor
+        # Extract desired output indices from the AST
+        if isinstance(self.ast, TensorRef):
+            # For TensorRef, use _eval_tensor which handles both equations and direct tensors
+            return self.prog._eval_tensor(self.ast.name, self.ast.indices, set())
+        else:
+            # For complex expressions, collect all indices mentioned and use _eval_expr
+            out_indices = tuple(self.prog._collect_indices(self.ast))
+            return self.prog._eval_expr(self.ast, out_indices)
 
 def softmax(x: "Expr", axis: str) -> "Expr":
     return Expr(x.prog, Call("softmax", (to_expr(x, x.prog).ast,), {"axis": TensorRef(axis, tuple())}))
@@ -372,66 +384,76 @@ class Program:
         # parse a LHS-like query
         parser = Parser(query+"=0")
         lhs_name, lhs_idx = parser.parse_tensor_lhs()
+        # Normalize empty string indices
+        lhs_idx = tuple(idx for idx in lhs_idx if idx)
         # Evaluate recursively
         return self._eval_tensor(lhs_name, tuple(lhs_idx), set())
 
     def _eval_tensor(self, name: str, want_idx: Tuple[str, ...], seen: set) -> NamedTensor:
+        # First check for equations defining this LHS
+        eqs = [e for e in self.equations if e.lhs_name == name]
+        if eqs:
+            if name in seen:
+                # to avoid infinite loops, return zeros of guessed shape
+                out = self._compute_eq(eqs[0], want_idx)
+                return out
+            seen.add(name)
+            # Sum contributions of all equations with same LHS (implicit sum)
+            parts = []
+            for e in eqs:
+                parts.append(self._compute_eq(e, want_idx))
+            # Sum (projection aligned by want_idx)
+            out = parts[0]
+            for p in parts[1:]:
+                out = NamedTensor(self.backend.add(out.data, p.data), out.indices, self.backend)
+            return out
+        
+        # Fall back to tensor data
         if name in self.tensors:
             t = self.tensors[name]
             if set(want_idx) - set(t.indices):
                 # Missing indices: cannot fabricate
-                # We can try to broadcast by inserting size-1 dims; otherwise raise.
                 raise KeyError(f"Tensor '{name}' does not have indices {want_idx}. Has {t.indices}.")
             return t.reorder(want_idx)
-        # look for equation(s) defining this LHS
-        if name in seen:
-            # to avoid infinite loops, return zeros of guessed shape
-            # Guess shape from first equation RHS
-            eqs = [e for e in self.equations if e.lhs_name == name]
-            if not eqs:
-                raise KeyError(f"No tensor or equation defines '{name}'.")
-            out = self._compute_eq(eqs[0], want_idx)
-            return out
-        seen.add(name)
-        eqs = [e for e in self.equations if e.lhs_name == name]
-        if not eqs:
-            raise KeyError(f"No tensor or equation defines '{name}'.")
-        # Sum contributions of all equations with same LHS (implicit sum)
-        parts = []
-        for e in eqs:
-            parts.append(self._compute_eq(e, want_idx))
-        # Sum (projection aligned by want_idx)
-        out = parts[0]
-        for p in parts[1:]:
-            out = NamedTensor(self.backend.add(out.data, p.data), out.indices, self.backend)
-        return out
+        
+        # No equations or tensors found
+        raise KeyError(f"No tensor or equation defines '{name}'.")
 
 
 
     def _eval_tensor_natural(self, name: str, seen: set) -> NamedTensor:
+        # Check for equations first - if there's an equation, evaluate it
+        # Otherwise, use the cached tensor if available
+        eqs = [e for e in self.equations if e.lhs_name == name]
+        if eqs:
+            if name in seen:
+                return self._compute_eq(eqs[0], eqs[0].lhs_indices)
+            seen.add(name)
+            parts = []
+            for e in eqs:
+                parts.append(self._compute_eq(e, e.lhs_indices))
+            # Sum aligned to the first part's indices
+            out = parts[0]
+            for p in parts[1:]:
+                p2 = p.reorder(out.indices)
+                out = NamedTensor(self.backend.add(out.data, p2.data), out.indices, self.backend)
+            return out
+        
+        # No equation, use cached tensor if available
         if name in self.tensors:
             return self.tensors[name]
-        if name in seen:
-            eqs = [e for e in self.equations if e.lhs_name == name]
-            if not eqs:
-                raise KeyError(f"No tensor or equation defines '{name}'.")
-            return self._compute_eq(eqs[0], eqs[0].lhs_indices)
-        seen.add(name)
-        eqs = [e for e in self.equations if e.lhs_name == name]
-        if not eqs:
-            raise KeyError(f"No tensor or equation defines '{name}'.")
-        parts = []
-        for e in eqs:
-            parts.append(self._compute_eq(e, e.lhs_indices))
-        # Sum aligned to the first part's indices
-        out = parts[0]
-        for p in parts[1:]:
-            p2 = p.reorder(out.indices)
-            out = NamedTensor(self.backend.add(out.data, p2.data), out.indices, self.backend)
-        return out
+        
+        raise KeyError(f"No tensor or equation defines '{name}'.")
+
+    def _normalize_indices(self, indices: Tuple[str, ...]) -> Tuple[str, ...]:
+        """Normalize indices by filtering out empty strings."""
+        return tuple(idx for idx in indices if idx)
 
     def _compute_eq(self, e: Equation, want_idx: Tuple[str, ...]) -> NamedTensor:
         lhs_idx = e.lhs_indices
+        # Normalize empty string indices to empty tuple
+        lhs_idx = self._normalize_indices(lhs_idx)
+        want_idx = self._normalize_indices(want_idx)
         out = self._eval_expr(e.rhs, lhs_idx)
         # Project (sum) over any indices not present in LHS
         extra = [idx for idx in out.indices if idx not in lhs_idx]
@@ -440,6 +462,13 @@ class Program:
             for idx in extra:
                 axis = out.indices.index(idx)
                 out = NamedTensor(self.backend.sum(out.data, axis=axis), tuple([i for i in out.indices if i != idx]), self.backend)
+        # Handle renaming: if want_idx uses different names than lhs_idx, rename first
+        if len(want_idx) == len(lhs_idx):
+            # Check if we need to rename indices (e.g., p -> p2)
+            if set(want_idx) != set(lhs_idx):
+                # Build a mapping from lhs_idx to want_idx
+                mapping = {old: new for old, new in zip(lhs_idx, want_idx)}
+                out = out.rename(mapping)
         # Reorder to the query's desired order
         return out.reorder(want_idx)
 
@@ -454,9 +483,15 @@ class Program:
 
         if isinstance(node, TensorRef):
             # fetch or compute recursively
-            t = self.tensors.get(node.name)
-            if t is None:
+            # If there's an equation for this tensor, always evaluate it (don't use cached tensor)
+            # Otherwise, use the direct tensor if available
+            has_equation = any(e.lhs_name == node.name for e in self.equations)
+            if has_equation:
                 t = self._eval_tensor_natural(node.name, set())
+            else:
+                t = self.tensors.get(node.name)
+                if t is None:
+                    t = self._eval_tensor_natural(node.name, set())
             # If user referenced the tensor with different index names (aliases), rename
             if tuple(node.indices) != t.indices:
                 if len(node.indices) != len(t.indices):
@@ -579,8 +614,9 @@ class Program:
             return NamedTensor(self.backend.mul(a.data, b.data), tuple(), self.backend)
 
         # Build global index -> letter map
+        # Include out_indices in the mapping to handle indices that appear only in output
         letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        all_idx = list(dict.fromkeys(list(a.indices) + list(b.indices)))
+        all_idx = list(dict.fromkeys(list(a.indices) + list(b.indices) + list(out_indices)))
         if len(all_idx) > len(letters):
             raise ValueError("Too many distinct indices for einsum.")
         idx2ch = {idx: letters[i] for i, idx in enumerate(all_idx)}
@@ -589,14 +625,34 @@ class Program:
         b_sub = "".join(idx2ch[i] for i in b.indices)
         out_sub = "".join(idx2ch[i] for i in out_indices)
 
-        subs = f"{a_sub},{b_sub}->{out_sub}" if out_sub else f"{a_sub},{b_sub}->"
+        # Construct einsum string - now that we normalize empty indices, einsum works correctly
+        if not out_sub:
+            # Empty output: sum over all indices
+            subs = f"{a_sub},{b_sub}->"
+        else:
+            subs = f"{a_sub},{b_sub}->{out_sub}"
         out_data = self.backend.einsum(subs, a.data, b.data)
         return NamedTensor(out_data, out_indices, self.backend)
 
     def _eval_to_factor(self, expr) -> NamedTensor:
         """Evaluate an expression to a factor (NamedTensor). If elementwise sum/diff,
         first materialize to required indices union."""
-        if isinstance(expr, (TensorRef, Number, Call)):
+        if isinstance(expr, TensorRef):
+            # For TensorRef, first check if it's an equation or direct tensor
+            # If it's a direct tensor, handle renaming if needed
+            if expr.name in self.tensors and expr.name not in [e.lhs_name for e in self.equations]:
+                # Direct tensor - check if we need to rename indices
+                t = self.tensors[expr.name]
+                if len(expr.indices) == len(t.indices) and set(expr.indices) != set(t.indices):
+                    # Need to rename: build mapping from tensor indices to requested indices
+                    # Match indices by position since they should align semantically
+                    mapping = {old: new for old, new in zip(t.indices, expr.indices)}
+                    res = t.rename(mapping)
+                    return res.reorder(expr.indices)
+            # For equations or when no renaming needed, use _eval_tensor which handles renaming via _compute_eq
+            res = self._eval_tensor(expr.name, expr.indices, set())
+            return res
+        if isinstance(expr, (Number, Call)):
             # Evaluate to some indices; for elementwise later alignment we'll align
             res = self._eval_expr(expr, tuple(self._collect_indices(expr)))
             return res
