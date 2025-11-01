@@ -89,3 +89,6 @@ This compiles to efficient backend `einsum` on NumPy / PyTorch / JAX.
 
 # Development
 Repository is under development
+```
+uv run pytest
+```
