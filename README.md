@@ -77,8 +77,42 @@ print("Raw scores:", scores)
 
 This compiles to efficient backend `einsum` on NumPy / PyTorch / JAX.
 
+- **Native symbolic/Datalog style** via `Relation`:
+  ```python
+  People = Domain(["Alice","Bob","Charlie"])
+  Parent = Relation("Parent", People, People)
+  Sister = Relation("Sister", People, People)
+  Aunt   = Relation("Aunt",   People, People)
+
+  Parent["Bob","Charlie"] = 1     # facts
+  Sister["Alice","Bob"]    = 1
+
+  Aunt["x","z"] = (Sister["x","y"] * Parent["y","z"]).step()   # rule
+  ```
+  Facts are stored in the program as Boolean tensors; rules are equations (join + projection + step),
+  and the final relation is the OR of facts and rules.
+
+- **Learnable parameters through `Tensor`**:
+  ```python
+  # Data tensor
+  X = Tensor(np.random.randn(3, 5), ["i","j"], name="X")
+
+  # Learnable parameter (Xavier init), marked learnable by default when no init is provided
+  W = Tensor(idxs=["o","i"], sizes=[8, 5], name="W")
+
+  # Non-learnable parameter (explicit init)
+  C = Tensor(idxs=["i","j"], sizes=[3, 5], name="C", init="zeros", learnable=False)
+  ```
+
+- **Attention correctness** in examples: scaled dot-product (`1/sqrt(dk)`), normalized
+  along the comparison axis (`softmax(..., axis="p2")`).
+
+- **Examples** updated: `examples/attention.py`, `examples/symbolic_aunt.py`.
+
+
 # Development
 Repository is under development
 ```
 uv run pytest
 ```
+

@@ -1,18 +1,20 @@
-from tensorlogic import Tensor, Domain, relation_from_facts
+from tensorlogic import Tensor, Domain, Relation
 import numpy as np
-People = Domain(["Alice","Bob","Charlie"])
 
-Parent_data = relation_from_facts("Parent", ["x","y"],
-    [("Alice","Bob"), ("Bob","Charlie")], {"x": People, "y": People}, "numpy")
-Sister_data = relation_from_facts("Sister", ["x","y"],
-    [("Alice","Bob")], {"x": People, "y": People}, "numpy")
+People = Domain(["Alice","Bob","Charlie","Dora"])
 
-Parent = Tensor(Parent_data.data, Parent_data.indices, name="Parent")
-Sister = Tensor(Sister_data.data, Sister_data.indices, name="Sister")
+Parent = Relation("Parent", People, People)
+Sister = Relation("Sister", People, People)
+Aunt   = Relation("Aunt",   People, People)
 
-# Aunt(x,z) <- Sister(x,y), Parent(y,z)
-Aunt = Tensor(np.zeros((3,3)), ["x","z"], name="Aunt")
+# Facts
+Parent["Bob","Charlie"] = 1
+Parent["Dora","Alice"]  = 1
+Sister["Alice","Bob"]   = 1
+Sister["Dora","Bob"]    = 1
+
+# Rule
 Aunt["x","z"] = (Sister["x","y"] * Parent["y","z"]).step()
 
-q = Aunt["x","z"].eval()
-print(q.indices, q.numpy())
+# Evaluate
+print("Aunt(Alice,Charlie)=", Aunt.value("Alice","Charlie"))

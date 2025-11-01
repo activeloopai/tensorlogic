@@ -41,3 +41,75 @@ def relation_from_facts(name: str,
             arr = data
             arr[coords] = 1.0
     return NamedTensor(data, tuple(indices), backend)
+
+
+class Relation:
+    """
+    Native relation with Python assignments.
+      Facts: R["Alice","Bob"] = 1
+      Rules: H["x","z"] = (R["x","y"] * S["y","z"]).step()
+    Uses a NamedTensor under the hood (registered with the global program).
+    """
+    def __init__(self, name: str, *domains: Domain):
+        if not domains:
+            raise ValueError("Provide at least one Domain")
+        self.name = name
+        self.domains = domains
+        # default indices names: x,y,z,u,v,w as needed
+        base = list("xyzuvw")
+        if len(domains) <= len(base):
+            self.indices = tuple(base[:len(domains)])
+        else:
+            self.indices = tuple([f"v{k}" for k in range(len(domains))])
+        # create a zeros tensor in the program (data tensor by default)
+        shape = [len(d) for d in domains]
+        b = get_backend(None)
+        data = b.zeros(shape)
+        self.tensor = NamedTensor(data, self.indices, b, name=name)
+
+    def __getitem__(self, idxs):
+        if not isinstance(idxs, (list,tuple)):
+            idxs = (idxs,)
+        if len(idxs) != len(self.indices):
+            raise ValueError("Wrong arity in relation indexing")
+        # return expression handle for rules: delegate to NamedTensor
+        return self.tensor[idxs]
+
+    def __setitem__(self, idxs, rhs):
+        if not isinstance(idxs, (list,tuple)):
+            idxs = (idxs,)
+        if len(idxs) != len(self.indices):
+            raise ValueError("Wrong arity in relation indexing")
+        # detect fact: all entries are constants existing in respective domains
+        is_const = []
+        for pos, key in enumerate(idxs):
+            is_const.append(key in self.domains[pos].sym2id)
+        if all(is_const):
+            # set 1.0 in underlying data and update program tensor
+            coords = tuple(self.domains[pos].id(idxs[pos]) for pos in range(len(idxs)))
+            arr = self.tensor.data
+            # backend-agnostic set
+            if hasattr(arr, "__setitem__"):
+                arr[coords] = 1.0
+            else:
+                # fallback: convert to numpy, set, wrap back (rare)
+                import numpy as _np
+                tmp = arr if isinstance(arr, _np.ndarray) else arr.numpy()
+                tmp[coords] = 1.0
+                arr = tmp
+            # re-register the tensor to update global program storage
+            from . import _global_program
+            self.tensor = NamedTensor(arr, self.indices, _global_program.backend, name=self.name)
+            _global_program.set_tensor(self.name, self.tensor)
+            return
+        # Else: rule; delegate to NamedTensor equation path
+        self.tensor[idxs] = rhs
+
+
+    def value(self, *names):
+        if len(names) != len(self.domains):
+            raise ValueError("Arity mismatch in value(...)")
+        coords = tuple(self.domains[i].id(names[i]) for i in range(len(names)))
+        # Evaluate the full relation (facts + rules)
+        evaluated = self.tensor[self.indices].eval().numpy()
+        return float(evaluated[coords])

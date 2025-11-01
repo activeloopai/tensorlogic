@@ -57,6 +57,19 @@ class Expr:
     def __sub__(self, other): return self._bin(other, "-")
     def __mul__(self, other): return self._bin(other, "*")
     def __truediv__(self, other): return self._bin(other, "/")
+    
+    # Right-side operators for scalars on the left
+    def __radd__(self, other): return self._bin(other, "+")
+    def __rsub__(self, other): 
+        # For a - b (where a is scalar, b is Expr), create BinOp("-", a, b)
+        b = to_expr(other, self.prog)
+        return Expr(self.prog, BinOp("-", b.ast, self.ast))
+    def __rmul__(self, other): return self._bin(other, "*")
+    def __rtruediv__(self, other):
+        # For a / b (where a is scalar, b is Expr), create BinOp("/", a, b)
+        b = to_expr(other, self.prog)
+        return Expr(self.prog, BinOp("/", b.ast, self.ast))
+    
     def __pow__(self, p):
         if isinstance(p, (int,float)):
             return Expr(self.prog, BinOp("^", self.ast, Number(float(p))))

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tensorlogic"
-version = "0.0.2"
+version = "0.0.4"
 description = "Tensor Logic: a named-index tensor language that unifies logic and tensor computation."
 readme = "README.md"
 license = "Apache-2.0"
